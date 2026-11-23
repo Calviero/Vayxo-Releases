@@ -84,7 +84,9 @@ jobs:
             intermediate="src-tauri/target/$TARGET/release"
             rm -rf "$intermediate/deps" "$intermediate/incremental"
             df -h .
-            APPIMAGE_EXTRACT_AND_RUN=1 NO_STRIP=1 pnpm exec tauri bundle --target "$TARGET" --bundles "$BUNDLES" --ci --verbose
+            # The freedesktop icon name must also exist inside the AppDir when the GStreamer plugin scans it.
+            linux_config='{"bundle":{"linux":{"appimage":{"files":{"/usr/share/icons/hicolor/128x128/apps/vayxo-launcher.png":"icons/128x128.png","/vayxo-launcher.png":"icons/128x128.png"}}}}}'
+            APPIMAGE_EXTRACT_AND_RUN=1 NO_STRIP=1 pnpm exec tauri bundle --target "$TARGET" --bundles "$BUNDLES" --config "$linux_config" --ci --verbose
           else
             pnpm exec tauri build --target "$TARGET" --bundles "$BUNDLES" --ci -- --locked
           fi
