@@ -91,6 +91,11 @@ jobs:
             pnpm exec tauri build --target "$TARGET" --bundles "$BUNDLES" --ci -- --locked
           fi
           node scripts/package-release.mjs collect "$TARGET"
+          if [ "$RUNNER_OS" = Linux ]; then
+            for package in release-files/*.deb release-files/*.rpm; do
+              if [ ! -s "$package.sig" ]; then pnpm exec tauri signer sign "$package"; fi
+            done
+          fi
       - name: Verify Mac disk image
         if: runner.os == 'macOS'
         run: hdiutil verify release-files/*.dmg

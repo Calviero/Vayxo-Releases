@@ -40,7 +40,6 @@ function artifact(name) {
 const downloads = Object.fromEntries(Object.entries(platformFiles).map(([platform,file])=>[platform,artifact(prefix + file)]))
 const updates = {}
 for (const [platform, file] of Object.entries(platformFiles)) {
-  if (platform.endsWith('-deb') || platform.endsWith('-rpm')) continue
   const name = prefix + file.replace(/\.dmg$/,'.app.tar.gz')
   const bytes = checkedFile(name)
   const signature = checkedFile(name + '.sig').toString().trim()
@@ -48,11 +47,15 @@ for (const [platform, file] of Object.entries(platformFiles)) {
   assert(sig.length === 74 && [0x4564,0x4544].includes(sig.readUInt16BE(0)) && sig.subarray(2,10).equals(publicPacket.subarray(2,10)), 'Unexpected signature packet for ' + name)
   const data = sig[1] === 68 ? createHash('blake2b512').update(bytes).digest() : bytes
   assert(verify(null, data, key, sig.subarray(10)), 'Invalid signature for ' + name)
-  updates[platform.split('-').slice(0,2).join('-')] = {url: base + name, signature}
+  const update = {url: base + name, signature}
+  if (platform.startsWith('linux-')) updates[platform] = update
+  if (!platform.endsWith('-deb') && !platform.endsWith('-rpm')) {
+    updates[platform.split('-').slice(0,2).join('-')] = update
+  }
 }
 const source = artifact(prefix + 'source.tar.gz')
 function json(name, value) {writeFileSync(join(dir,name),JSON.stringify(value,null,2)+'\n')}
 json('latest.json', {version, platforms:updates})
 json('vayxo-manifest.json', {version, platforms:downloads, source})
 writeFileSync(join(dir,'SHA256SUMS.txt'), [...checksums].sort().map(([name,hash])=>hash+'  '+name).join('\n')+'\n')
-console.log(`Verified ${checksums.size} assets, six installers and four signed desktop updates for ${version}.`)
+console.log(`Verified ${checksums.size} assets, six installers and six signed desktop updates for ${version}.`)
