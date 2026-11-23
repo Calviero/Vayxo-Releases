@@ -1,0 +1,84 @@
+name: Build and verify a release draft
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version of the source attached to the draft
+        type: string
+        required: true
+      sha256:
+        description: SHA-256 of the source archive
+        type: string
+        required: true
+permissions:
+  contents: read
+jobs:
+  build:
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { runner: windows-2025, target: x86_64-pc-windows-msvc, bundles: nsis }
+          - { runner: ubuntu-24.04, target: x86_64-unknown-linux-gnu, bundles: 'deb,rpm,appimage' }
+          - { runner: macos-15, target: aarch64-apple-darwin, bundles: 'app,dmg' }
+          - { runner: macos-15-intel, target: x86_64-apple-darwin, bundles: 'app,dmg' }
+    runs-on: ${{ matrix.runner }}
+    env:
+      VERSION: ${{ inputs.version }}
+      SOURCE_HASH: ${{ inputs.sha256 }}
+      TARGET: ${{ matrix.target }}
+      BUNDLES: ${{ matrix.bundles }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Read source from the unpublished draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ && "$SOURCE_HASH" =~ ^[0-9a-f]{64}$ ]]
+          test "$(gh release view "v$VERSION" -R "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft)" = true
+          source="vayxo-launcher-$VERSION-source.tar.gz"
+          gh release download "v$VERSION" -R "$GITHUB_REPOSITORY" -p "$source"
+          node -e "const b=require('fs').readFileSync(process.argv[1]);if(require('crypto').createHash('sha256').update(b).digest('hex')!==process.env.SOURCE_HASH)process.exit(1)" "$source"
+          tar -xzf "$source"
+          test "$(node -p "require('./src-tauri/tauri.conf.json').version")" = "$VERSION"
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v6
+        with: {node-version: 24}
+      - name: Native dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf libssl-dev file
+      - name: Install Rust target and frontend packages
+        run: |
+          rustup target add "$TARGET"
+          pnpm install --frozen-lockfile
+      - name: Compile and sign update
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          VAYXO_DISCORD_CLIENT_ID: '1572330434434437271'
+        run: |
+          if [ "$RUNNER_OS" = macOS ]; then export APPLE_SIGNING_IDENTITY=-; fi
+          pnpm exec tauri build --target "$TARGET" --bundles "$BUNDLES" --ci -- --locked
+          node scripts/package-release.mjs collect "$TARGET"
+      - name: Verify Mac disk image
+        if: runner.os == 'macOS'
+        run: hdiutil verify release-files/*.dmg
+      - name: Verify Linux formats
+        if: runner.os == 'Linux'
+        run: |
+          dpkg-deb --info release-files/*.deb >/dev/null
+          rpm -qp release-files/*.rpm
+          image=$(realpath release-files/*.AppImage); tmp=$(mktemp -d)
+          (cd "$tmp"; "$image" --appimage-extract >/dev/null; test -x squashfs-root/AppRun)
+      - name: Save verified packages in draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          test "$(gh release view "v$VERSION" -R "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft)" = true
+          gh release upload "v$VERSION" -R "$GITHUB_REPOSITORY" release-files/* --clobber
