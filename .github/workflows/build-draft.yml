@@ -6,6 +6,11 @@ on:
         description: Version of the source attached to the draft
         type: string
         required: true
+      platform:
+        description: Build all platforms or just Linux
+        type: choice
+        options: [all, linux]
+        default: all
       sha256:
         description: SHA-256 of the source archive
         type: string
@@ -13,17 +18,26 @@ on:
 permissions:
   contents: read
 jobs:
+  plan:
+    runs-on: ubuntu-24.04
+    outputs:
+      targets: ${{ steps.select.outputs.targets }}
+    steps:
+      - id: select
+        env:
+          PLATFORM: ${{ inputs.platform }}
+        run: |
+          targets='[{"runner":"windows-2025","target":"x86_64-pc-windows-msvc","bundles":"nsis"},{"runner":"ubuntu-24.04","target":"x86_64-unknown-linux-gnu","bundles":"deb,rpm,appimage"},{"runner":"macos-15","target":"aarch64-apple-darwin","bundles":"app,dmg"},{"runner":"macos-15-intel","target":"x86_64-apple-darwin","bundles":"app,dmg"}]'
+          if [ "$PLATFORM" = linux ]; then targets=$(jq -c '[.[]|select(.runner=="ubuntu-24.04")]' <<<"$targets"); fi
+          echo "targets=$targets" >> "$GITHUB_OUTPUT"
   build:
+    needs: plan
     permissions:
       contents: write
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - { runner: windows-2025, target: x86_64-pc-windows-msvc, bundles: nsis }
-          - { runner: ubuntu-24.04, target: x86_64-unknown-linux-gnu, bundles: 'deb,rpm,appimage' }
-          - { runner: macos-15, target: aarch64-apple-darwin, bundles: 'app,dmg' }
-          - { runner: macos-15-intel, target: x86_64-apple-darwin, bundles: 'app,dmg' }
+        include: ${{ fromJSON(needs.plan.outputs.targets) }}
     runs-on: ${{ matrix.runner }}
     env:
       VERSION: ${{ inputs.version }}
@@ -53,7 +67,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf libssl-dev file
+          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf libssl-dev file rpm libfuse2t64 gstreamer1.0-tools
       - name: Install Rust target and frontend packages
         run: |
           rustup target add "$TARGET"
@@ -64,7 +78,16 @@ jobs:
           VAYXO_DISCORD_CLIENT_ID: '1572330434434437271'
         run: |
           if [ "$RUNNER_OS" = macOS ]; then export APPLE_SIGNING_IDENTITY=-; fi
-          pnpm exec tauri build --target "$TARGET" --bundles "$BUNDLES" --ci -- --locked
+          if [ "$RUNNER_OS" = Linux ]; then
+            pnpm exec tauri build --target "$TARGET" --no-bundle --ci -- --locked
+            # Rust's intermediate objects can exceed the runner's free disk during AppImage assembly.
+            intermediate="src-tauri/target/$TARGET/release"
+            rm -rf "$intermediate/deps" "$intermediate/incremental"
+            df -h .
+            APPIMAGE_EXTRACT_AND_RUN=1 NO_STRIP=1 pnpm exec tauri bundle --target "$TARGET" --bundles "$BUNDLES" --ci --verbose
+          else
+            pnpm exec tauri build --target "$TARGET" --bundles "$BUNDLES" --ci -- --locked
+          fi
           node scripts/package-release.mjs collect "$TARGET"
       - name: Verify Mac disk image
         if: runner.os == 'macOS'
