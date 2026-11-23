@@ -80,12 +80,12 @@ jobs:
           if [ "$RUNNER_OS" = macOS ]; then export APPLE_SIGNING_IDENTITY=-; fi
           if [ "$RUNNER_OS" = Linux ]; then
             pnpm exec tauri build --target "$TARGET" --no-bundle --ci -- --locked
-            # Rust's intermediate objects can exceed the runner's free disk during AppImage assembly.
+            # Deploy the Linux payload with the standard GTK bundle. The optional
+            # GStreamer bundler aborts on the desktop icon before generating AppImage.
             intermediate="src-tauri/target/$TARGET/release"
             rm -rf "$intermediate/deps" "$intermediate/incremental"
-            df -h .
-            # The freedesktop icon name must also exist inside the AppDir when the GStreamer plugin scans it.
-            linux_config='{"bundle":{"linux":{"appimage":{"files":{"/usr/share/icons/hicolor/128x128/apps/vayxo-launcher.png":"icons/128x128.png","/vayxo-launcher.png":"icons/128x128.png"}}}}}'
+            unset APPIMAGE_BUNDLE_GSTREAMER
+            linux_config='{"bundle":{"linux":{"appimage":{"bundleMediaFramework":false}}}}'
             APPIMAGE_EXTRACT_AND_RUN=1 NO_STRIP=1 pnpm exec tauri bundle --target "$TARGET" --bundles "$BUNDLES" --config "$linux_config" --ci --verbose
           else
             pnpm exec tauri build --target "$TARGET" --bundles "$BUNDLES" --ci -- --locked
