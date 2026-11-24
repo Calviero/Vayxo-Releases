@@ -79,6 +79,7 @@ jobs:
         run: |
           if [ "$RUNNER_OS" = macOS ]; then export APPLE_SIGNING_IDENTITY=-; fi
           if [ "$RUNNER_OS" = Linux ]; then
+            sed -i 's/\r$//' src-tauri/linux.desktop
             pnpm exec tauri build --target "$TARGET" --no-bundle --ci -- --locked
             # Deploy the Linux payload with the standard GTK bundle. The optional
             # GStreamer bundler aborts on the desktop icon before generating AppImage.
@@ -94,7 +95,7 @@ jobs:
               icon="$appdir/usr/share/icons/hicolor/128x128/apps/vayxo-launcher.png"
               install -D -m 644 src-tauri/icons/128x128.png "$icon"
               install -m 644 "$icon" "$appdir/vayxo-launcher.png"
-              sed -i 's/^Icon=.*/Icon=vayxo-launcher/' "$desktop"
+              sed -i -e 's/\r$//' -e 's/^Icon=.*/Icon=vayxo-launcher/' "$desktop"
               ln -sfn vayxo-launcher.png "$appdir/.DirIcon"
               appimage="$bundle/Vayxo Launcher_${VERSION}_amd64.AppImage"
               linuxdeploy="$(find "$HOME/.cache/tauri" -type f -name 'linuxdeploy*x86_64.AppImage' -print -quit)"
