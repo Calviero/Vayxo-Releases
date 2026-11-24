@@ -86,7 +86,23 @@ jobs:
             rm -rf "$intermediate/deps" "$intermediate/incremental"
             unset APPIMAGE_BUNDLE_GSTREAMER
             linux_config='{"bundle":{"linux":{"appimage":{"bundleMediaFramework":false}}}}'
-            APPIMAGE_EXTRACT_AND_RUN=1 NO_STRIP=1 pnpm exec tauri bundle --target "$TARGET" --bundles "$BUNDLES" --config "$linux_config" --ci --verbose
+            if ! APPIMAGE_EXTRACT_AND_RUN=1 NO_STRIP=1 pnpm exec tauri bundle --target "$TARGET" --bundles "$BUNDLES" --config "$linux_config" --ci --verbose; then
+              bundle=$(realpath "$intermediate/bundle/appimage")
+              appdir="$bundle/Vayxo Launcher.AppDir"
+              desktop="$(find "$appdir/usr/share/applications" -type f -name '*.desktop' -print -quit)"
+              test -n "$desktop"
+              icon="$appdir/usr/share/icons/hicolor/128x128/apps/vayxo-launcher.png"
+              install -D -m 644 src-tauri/icons/128x128.png "$icon"
+              install -m 644 "$icon" "$appdir/vayxo-launcher.png"
+              sed -i 's/^Icon=.*/Icon=vayxo-launcher/' "$desktop"
+              ln -sfn vayxo-launcher.png "$appdir/.DirIcon"
+              appimage="$bundle/Vayxo Launcher_${VERSION}_amd64.AppImage"
+              linuxdeploy="$(find "$HOME/.cache/tauri" -type f -name 'linuxdeploy*x86_64.AppImage' -print -quit)"
+              test -x "$linuxdeploy"
+              OUTPUT="$appimage" ARCH=x86_64 APPIMAGE_EXTRACT_AND_RUN=1 NO_STRIP=1 "$linuxdeploy" --appimage-extract-and-run --appdir "$appdir" --desktop-file "$desktop" --icon-file "$icon" --output appimage
+              chmod +x "$appimage"
+              pnpm exec tauri signer sign "$appimage"
+            fi
           else
             pnpm exec tauri build --target "$TARGET" --bundles "$BUNDLES" --ci -- --locked
           fi
